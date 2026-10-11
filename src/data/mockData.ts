@@ -1,4 +1,4 @@
-import type { DashboardData, DashboardDataSource, UserProfile } from '../types/dashboard'
+import type { DashboardData, DashboardDataSource, NewReservationInput, UserProfile } from '../types/dashboard'
 
 export const demoUser: UserProfile = {
   id: 'demo-user',
@@ -39,6 +39,11 @@ const baseData: DashboardData = {
     { day: '25/04', occupied: 21, available: 7 },
     { day: '28/04', occupied: 24, available: 9 },
     { day: '30/04', occupied: 25, available: 7 },
+  ],
+  roomOptions: [
+    { id: 'demo-104', number: '104', roomType: 'Duplo', basePrice: 320 },
+    { id: 'demo-201', number: '201', roomType: 'Triplo', basePrice: 420 },
+    { id: 'demo-305', number: '305', roomType: 'Suíte', basePrice: 560 },
   ],
   reservations: [
     { code: 'R0018', guest: 'Ana Souza', checkIn: '23/04/2025', checkOut: '26/04/2025', room: '104', roomType: 'Duplo', value: 620, status: 'confirmed', origin: 'WhatsApp' },
@@ -84,6 +89,10 @@ export const mockDashboardDataSource: DashboardDataSource = {
     }
 
     return baseData
+  },
+  async createReservation(_input: NewReservationInput) {
+    await new Promise((resolve) => setTimeout(resolve, 250))
+    return { code: `R${String(Date.now()).slice(-6)}` }
   },
 }
 

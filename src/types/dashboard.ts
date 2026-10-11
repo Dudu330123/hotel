@@ -29,6 +29,30 @@ export interface ReservationSummary {
   origin: string
 }
 
+export interface RoomOption {
+  id: string
+  number: string
+  roomType: string
+  basePrice: number
+}
+
+export interface NewReservationInput {
+  fullName: string
+  phone: string
+  checkIn: string
+  checkOut: string
+  roomId: string | null
+  origin: string
+  totalAmount: number
+  adults: number
+  children: number
+  notes?: string
+}
+
+export interface ReservationCreationResult {
+  code: string
+}
+
 export interface StaySummary {
   code: string
   guest: string
@@ -66,6 +90,7 @@ export interface DashboardData {
   }
   revenueByRoomType: Array<{ name: string; value: number; color: string }>
   occupancyTrend: Array<{ day: string; occupied: number; available: number }>
+  roomOptions: RoomOption[]
   reservations: ReservationSummary[]
   stays: StaySummary[]
   expenses: ExpenseSummary[]
@@ -77,4 +102,5 @@ export interface DashboardFilters {
 
 export interface DashboardDataSource {
   getDashboardData(filters: DashboardFilters): Promise<DashboardData>
+  createReservation(input: NewReservationInput): Promise<ReservationCreationResult>
 }

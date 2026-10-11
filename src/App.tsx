@@ -43,11 +43,11 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { demoUser, mockDashboardDataSource, rooms } from './data/mockData'
+import { demoUser, mockDashboardDataSource } from './data/mockData'
 import { getAuthenticatedUserProfile, supabaseDashboardDataSource } from './data/supabaseDataSource'
 import { LoginPage } from './components/LoginPage'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
-import type { DashboardData, NavKey, ReservationSummary, Status } from './types/dashboard'
+import type { DashboardData, NavKey, NewReservationInput, ReservationSummary, RoomOption, Status } from './types/dashboard'
 
 const navItems: Array<{ key: NavKey; label: string; icon: typeof Home }> = [
   { key: 'dashboard', label: 'Painel', icon: LayoutDashboard },
@@ -84,6 +84,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(true)
   const [isReservationOpen, setIsReservationOpen] = useState(false)
   const [isSearchOpen, setIsSearchOpen] = useState(false)
+  const [dataRevision, setDataRevision] = useState(0)
   const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
@@ -140,7 +141,7 @@ function App() {
     return () => {
       isCurrent = false
     }
-  }, [authReady, period, sessionUserId])
+  }, [authReady, period, sessionUserId, dataRevision])
 
   useEffect(() => {
     if (!notice) return
@@ -161,6 +162,14 @@ function App() {
     if (key !== 'dashboard') {
       setNotice(`${navTitle[key]} está preparado para a próxima etapa do protótipo.`)
     }
+  }
+
+  const handleSaveReservation = async (input: NewReservationInput) => {
+    const dataSource = sessionUserId ? supabaseDashboardDataSource : mockDashboardDataSource
+    const result = await dataSource.createReservation(input)
+    setIsReservationOpen(false)
+    setDataRevision((revision) => revision + 1)
+    setNotice(sessionUserId ? `Reserva ${result.code} criada e salva no Supabase.` : `Reserva ${result.code} criada no modo demonstração.`)
   }
 
   if (isSupabaseConfigured && !authReady) {
@@ -195,10 +204,11 @@ function App() {
         )}
       </main>
       {isReservationOpen && (
-        <NewReservationModal onClose={() => setIsReservationOpen(false)} onSaved={() => {
-          setIsReservationOpen(false)
-          setNotice(sessionUserId ? 'O cadastro completo de reservas será conectado na próxima etapa.' : 'Reserva criada no modo demonstração.')
-        }} />
+        <NewReservationModal
+          roomOptions={data?.roomOptions ?? []}
+          onClose={() => setIsReservationOpen(false)}
+          onSave={handleSaveReservation}
+        />
       )}
       {isSearchOpen && <SearchModal onClose={() => setIsSearchOpen(false)} />}
       {notice && <Toast message={notice} onClose={() => setNotice(null)} />}
@@ -449,12 +459,55 @@ function ModulePlaceholder({ activeNav, onBack }: { activeNav: NavKey; onBack: (
   return <div className="page-enter px-8 py-7"><div className="mx-auto max-w-[1460px]"><div className="flex items-start justify-between"><div><div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-[#0b74c9]"><Icon size={14} /> Módulo do sistema</div><h1 className="text-[28px] font-extrabold tracking-[-0.035em] text-[#10253f]">{navTitle[activeNav]}</h1><p className="mt-1.5 text-sm text-slate-500">{page.description}</p></div><button onClick={onBack} className="flex items-center gap-2 rounded-xl border border-[#dce5ef] bg-white px-4 py-2.5 text-xs font-bold text-[#31516e] shadow-sm hover:bg-slate-50">Voltar ao painel</button></div><div className="mt-7 grid grid-cols-3 gap-5">{page.items.map((item, index) => <div key={item} className="rounded-2xl border border-[#e3eaf2] bg-white p-5 shadow-[0_4px_18px_rgba(20,52,83,0.035)]"><div className="grid size-10 place-items-center rounded-xl bg-[#eaf4ff] text-[#0b74c9]"><span className="text-sm font-extrabold">0{index + 1}</span></div><h2 className="mt-5 text-sm font-extrabold text-[#18324d]">{item}</h2><p className="mt-2 text-xs leading-relaxed text-slate-400">Essa área será conectada ao Supabase depois da validação do protótipo.</p><div className="mt-5 flex items-center gap-2 text-[11px] font-bold text-[#0b74c9]">Preparado para próxima fase <span>→</span></div></div>)}</div><div className="mt-5 rounded-2xl border border-dashed border-[#bfd0e1] bg-[#f9fbfd] p-10 text-center"><div className="mx-auto grid size-12 place-items-center rounded-2xl bg-white text-[#0b74c9] shadow-sm"><Sparkles size={21} /></div><h2 className="mt-4 text-base font-extrabold text-[#18324d]">Protótipo em evolução</h2><p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-500">O layout deste módulo está preparado. Depois da aprovação visual do painel, vamos transformar esta área em uma tela completa com dados e ações reais.</p></div></div></div>
 }
 
-function NewReservationModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  return <div className="fixed inset-0 z-40 grid place-items-center bg-[#071d32]/45 p-6 backdrop-blur-[2px]"><div className="w-full max-w-[570px] rounded-3xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between"><div><div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-[#0b74c9]"><Plus size={14} /> Nova reserva</div><h2 className="text-xl font-extrabold text-[#10253f]">Adicionar uma reserva</h2><p className="mt-1 text-xs text-slate-500">Preencha os dados básicos para a demonstração.</p></div><button onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Fechar"><X size={18} /></button></div><div className="mt-6 grid grid-cols-2 gap-4"><Field label="Nome do hóspede" placeholder="Ex.: Ana Souza" /><Field label="Telefone" placeholder="(00) 00000-0000" /><Field label="Check-in" type="date" defaultValue="2025-04-23" /><Field label="Check-out" type="date" defaultValue="2025-04-26" /><Field label="Quarto" placeholder="Selecione o quarto" select options={['104 · Duplo', '201 · Triplo', '305 · Suíte']} /><Field label="Origem" placeholder="Selecione a origem" select options={['WhatsApp', 'Telefone', 'Booking', 'Site', 'Balcão']} /></div><div className="mt-6 flex justify-end gap-3"><button onClick={onClose} className="rounded-xl px-4 py-2.5 text-xs font-bold text-slate-500 hover:bg-slate-100">Cancelar</button><button onClick={onSaved} className="flex items-center gap-2 rounded-xl bg-[#0b74c9] px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-[#0b74c9]/20 hover:bg-[#095fa5]"><Check size={15} /> Salvar demonstração</button></div></div></div>
+function NewReservationModal({ roomOptions, onClose, onSave }: { roomOptions: RoomOption[]; onClose: () => void; onSave: (input: NewReservationInput) => Promise<void> }) {
+  const today = new Date()
+  const defaultCheckIn = today.toISOString().slice(0, 10)
+  const defaultCheckOut = new Date(today.getTime() + 86400000).toISOString().slice(0, 10)
+  const [form, setForm] = useState({ fullName: '', phone: '', checkIn: defaultCheckIn, checkOut: defaultCheckOut, roomId: '', origin: 'Balcão', adults: '1', children: '0' })
+  const [isSaving, setIsSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const selectedRoom = roomOptions.find((room) => room.id === form.roomId)
+  const nights = Math.max(1, Math.ceil((new Date(`${form.checkOut}T12:00:00`).getTime() - new Date(`${form.checkIn}T12:00:00`).getTime()) / 86400000))
+  const totalAmount = selectedRoom ? selectedRoom.basePrice * nights : 0
+  const setField = (field: keyof typeof form, value: string) => setForm((current) => ({ ...current, [field]: value }))
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setError(null)
+    if (!form.fullName.trim()) {
+      setError('Informe o nome do hóspede.')
+      return
+    }
+    if (!form.checkIn || !form.checkOut || form.checkOut <= form.checkIn) {
+      setError('A data de saída deve ser posterior à entrada.')
+      return
+    }
+
+    setIsSaving(true)
+    try {
+      await onSave({
+        fullName: form.fullName,
+        phone: form.phone,
+        checkIn: form.checkIn,
+        checkOut: form.checkOut,
+        roomId: form.roomId || null,
+        origin: form.origin,
+        totalAmount,
+        adults: Math.max(1, Number(form.adults) || 1),
+        children: Math.max(0, Number(form.children) || 0),
+      })
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Não foi possível salvar a reserva.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  return <div className="fixed inset-0 z-40 grid place-items-center bg-[#071d32]/45 p-6 backdrop-blur-[2px]"><div className="w-full max-w-[610px] rounded-3xl bg-white p-6 shadow-2xl"><div className="flex items-start justify-between"><div><div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-[#0b74c9]"><Plus size={14} /> Nova reserva</div><h2 className="text-xl font-extrabold text-[#10253f]">Adicionar uma reserva</h2><p className="mt-1 text-xs text-slate-500">Os dados serão salvos no Supabase quando houver uma sessão autenticada.</p></div><button onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Fechar"><X size={18} /></button></div><form onSubmit={handleSubmit} className="mt-6"><div className="grid grid-cols-2 gap-4"><Field label="Nome do hóspede" placeholder="Ex.: Ana Souza" value={form.fullName} onChange={(value) => setField('fullName', value)} /><Field label="Telefone" placeholder="(00) 00000-0000" value={form.phone} onChange={(value) => setField('phone', value)} /><Field label="Check-in" type="date" value={form.checkIn} onChange={(value) => setField('checkIn', value)} /><Field label="Check-out" type="date" value={form.checkOut} onChange={(value) => setField('checkOut', value)} /><Field label="Quarto" placeholder="Sem quarto definido" select value={form.roomId} onChange={(value) => setField('roomId', value)} options={[{ value: '', label: 'Sem quarto definido' }, ...roomOptions.map((room) => ({ value: room.id, label: `${room.number} · ${room.roomType} — ${formatCurrency(room.basePrice)}/noite` }))]} /><Field label="Origem" select value={form.origin} onChange={(value) => setField('origin', value)} options={['WhatsApp', 'Telefone', 'Booking', 'Site', 'Balcão'].map((origin) => ({ value: origin, label: origin }))} /><Field label="Adultos" type="number" value={form.adults} onChange={(value) => setField('adults', value)} /><Field label="Crianças" type="number" value={form.children} onChange={(value) => setField('children', value)} /></div><div className="mt-4 flex items-center justify-between rounded-xl bg-[#f5f9fd] px-4 py-3"><div><div className="text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400">Resumo da reserva</div><div className="mt-1 text-xs font-semibold text-[#31516e]">{nights} {nights === 1 ? 'diária' : 'diárias'}{selectedRoom ? ` · Quarto ${selectedRoom.number}` : ''}</div></div><strong className="text-lg font-extrabold text-[#10253f]">{formatCurrency(totalAmount)}</strong></div>{error && <div className="mt-4 rounded-xl border border-[#ffd3d3] bg-[#fff3f3] px-3 py-2.5 text-xs font-semibold text-[#c74d4d]">{error}</div>}<div className="mt-6 flex justify-end gap-3"><button type="button" onClick={onClose} className="rounded-xl px-4 py-2.5 text-xs font-bold text-slate-500 hover:bg-slate-100">Cancelar</button><button type="submit" disabled={isSaving} className="flex items-center gap-2 rounded-xl bg-[#0b74c9] px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-[#0b74c9]/20 hover:bg-[#095fa5] disabled:cursor-wait disabled:opacity-60"><Check size={15} /> {isSaving ? 'Salvando...' : 'Salvar reserva'}</button></div></form></div></div>
 }
 
-function Field({ label, placeholder, type = 'text', defaultValue, select, options }: { label: string; placeholder?: string; type?: string; defaultValue?: string; select?: boolean; options?: string[] }) {
-  return <label className="block"><span className="mb-1.5 block text-[11px] font-bold text-[#3b5772]">{label}</span>{select ? <select defaultValue="" className="h-10 w-full rounded-xl border border-[#dce5ef] bg-white px-3 text-xs text-slate-600 outline-none transition focus:border-[#0b74c9]"><option value="" disabled>{placeholder}</option>{options?.map((option) => <option key={option}>{option}</option>)}</select> : <input type={type} defaultValue={defaultValue} placeholder={placeholder} className="h-10 w-full rounded-xl border border-[#dce5ef] bg-white px-3 text-xs text-slate-600 outline-none transition placeholder:text-slate-300 focus:border-[#0b74c9]" />}</label>
+function Field({ label, placeholder, type = 'text', value, onChange, select, options }: { label: string; placeholder?: string; type?: string; value: string; onChange: (value: string) => void; select?: boolean; options?: Array<{ value: string; label: string }> }) {
+  return <label className="block"><span className="mb-1.5 block text-[11px] font-bold text-[#3b5772]">{label}</span>{select ? <select value={value} onChange={(event) => onChange(event.target.value)} className="h-10 w-full rounded-xl border border-[#dce5ef] bg-white px-3 text-xs text-slate-600 outline-none transition focus:border-[#0b74c9]">{placeholder && <option value="" disabled>{placeholder}</option>}{options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : <input type={type} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} min={type === 'number' ? 0 : undefined} className="h-10 w-full rounded-xl border border-[#dce5ef] bg-white px-3 text-xs text-slate-600 outline-none transition placeholder:text-slate-300 focus:border-[#0b74c9]" />}</label>
 }
 
 function SearchModal({ onClose }: { onClose: () => void }) {

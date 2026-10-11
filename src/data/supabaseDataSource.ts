@@ -3,7 +3,9 @@ import type {
   DashboardDataSource,
   DashboardFilters,
   ExpenseSummary,
+  NewReservationInput,
   ReservationSummary,
+  ReservationCreationResult,
   StaySummary,
   UserProfile,
 } from '../types/dashboard'
@@ -50,9 +52,9 @@ export async function getAuthenticatedUserProfile(): Promise<UserProfile | null>
   }
 }
 
-type RoomTypeRow = { name: string; color: string }
+type RoomTypeRow = { id?: string; name: string; color: string; base_price?: number | string }
 type Relation<T> = T | T[] | null
-type RoomRow = { number: string; status: string; room_types?: Relation<RoomTypeRow> }
+type RoomRow = { id: string; number: string; status: string; room_types?: Relation<RoomTypeRow> }
 type ReservationRow = {
   code: string
   check_in: string
@@ -122,13 +124,89 @@ const createTrend = (occupied: number, available: number) => {
   return points
 }
 
+const reservationCode = () => `R${String(Date.now()).slice(-8)}`
+
+export async function createSupabaseReservation(input: NewReservationInput): Promise<ReservationCreationResult> {
+  if (!supabase) throw new Error('Supabase não configurado.')
+
+  const fullName = input.fullName.trim()
+  const phone = input.phone.trim()
+  if (!fullName) throw new Error('Informe o nome do hóspede.')
+  if (!input.checkIn || !input.checkOut || input.checkOut <= input.checkIn) {
+    throw new Error('A data de saída deve ser posterior à entrada.')
+  }
+  if (input.totalAmount < 0) throw new Error('O valor da reserva não pode ser negativo.')
+
+  if (input.roomId) {
+    const { data: conflicts, error: conflictError } = await supabase
+      .from('reservations')
+      .select('id')
+      .eq('room_id', input.roomId)
+      .neq('status', 'cancelled')
+      .lt('check_in', input.checkOut)
+      .gt('check_out', input.checkIn)
+      .limit(1)
+
+    if (conflictError) throw conflictError
+    if (conflicts?.length) throw new Error('Esse quarto já possui uma reserva nesse período.')
+  }
+
+  let guestId: string | null = null
+  if (phone) {
+    const { data: existingGuest, error: guestLookupError } = await supabase
+      .from('guests')
+      .select('id')
+      .eq('phone', phone)
+      .maybeSingle()
+    if (guestLookupError) throw guestLookupError
+    guestId = existingGuest?.id ?? null
+  }
+
+  if (!guestId) {
+    const { data: guest, error: guestError } = await supabase
+      .from('guests')
+      .insert({ full_name: fullName, phone: phone || null })
+      .select('id')
+      .single()
+    if (guestError) throw guestError
+    guestId = guest.id
+  } else {
+    const { error: guestUpdateError } = await supabase
+      .from('guests')
+      .update({ full_name: fullName })
+      .eq('id', guestId)
+    if (guestUpdateError) throw guestUpdateError
+  }
+
+  const { data: reservation, error: reservationError } = await supabase
+    .from('reservations')
+    .insert({
+      code: reservationCode(),
+      guest_id: guestId,
+      room_id: input.roomId,
+      check_in: input.checkIn,
+      check_out: input.checkOut,
+      adults: input.adults,
+      children: input.children,
+      origin: input.origin,
+      status: 'pending',
+      total_amount: input.totalAmount,
+      notes: input.notes?.trim() || null,
+    })
+    .select('code')
+    .single()
+
+  if (reservationError) throw reservationError
+  return { code: reservation.code }
+}
+
 export const supabaseDashboardDataSource: DashboardDataSource = {
   async getDashboardData(_filters: DashboardFilters): Promise<DashboardData> {
     if (!supabase) throw new Error('Supabase não configurado.')
 
     const [roomsResult, roomTypesResult, reservationsResult, staysResult, paymentsResult, expensesResult] = await Promise.all([
-      supabase.from('rooms').select('number, status, room_types(name, color)').order('number'),
-      supabase.from('room_types').select('name, color').eq('active', true).order('name'),
+      supabase.from('rooms').select('id, number, status, room_types(name, color, base_price)').order('number'),
+      supabase.from('room_types').select('id, name, color, base_price').eq('active', true).order('name'),
       supabase
         .from('reservations')
         .select('code, check_in, check_out, total_amount, status, origin, guests(full_name), rooms(number, room_types(name, color))')
@@ -195,6 +273,17 @@ export const supabaseDashboardDataSource: DashboardDataSource = {
       },
       revenueByRoomType,
       occupancyTrend: createTrend(occupied, available),
+      roomOptions: rooms
+        .filter((room) => room.status !== 'maintenance' && room.status !== 'blocked')
+        .map((room) => {
+          const roomType = firstRelation(room.room_types)
+          return {
+            id: room.id,
+            number: room.number,
+            roomType: roomType?.name ?? 'Não definido',
+            basePrice: currencyNumber(roomType?.base_price),
+          }
+        }),
       reservations: reservations.map((reservation) => {
         const guest = firstRelation(reservation.guests)
         const room = firstRelation(reservation.rooms)
@@ -234,5 +323,6 @@ export const supabaseDashboardDataSource: DashboardDataSource = {
       })),
     }
   },
+  createReservation: createSupabaseReservation,
 }
 
