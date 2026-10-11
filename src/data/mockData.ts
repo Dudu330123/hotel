@@ -8,6 +8,13 @@ export const demoUser: UserProfile = {
 }
 
 const baseData: DashboardData = {
+  metrics: {
+    totalStays: 48,
+    futureReservations: 18,
+    grossRevenue: 28560,
+    totalReceived: 24320,
+    pendingAmount: 4240,
+  },
   occupancy: {
     occupied: 22,
     available: 8,

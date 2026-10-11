@@ -48,7 +48,16 @@ export interface ExpenseSummary {
   status: 'paid' | 'pending'
 }
 
+export interface DashboardMetrics {
+  totalStays: number
+  futureReservations: number
+  grossRevenue: number
+  totalReceived: number
+  pendingAmount: number
+}
+
 export interface DashboardData {
+  metrics: DashboardMetrics
   occupancy: {
     occupied: number
     available: number

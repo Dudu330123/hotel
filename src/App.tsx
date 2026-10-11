@@ -44,6 +44,9 @@ import {
   YAxis,
 } from 'recharts'
 import { demoUser, mockDashboardDataSource, rooms } from './data/mockData'
+import { getAuthenticatedUserProfile, supabaseDashboardDataSource } from './data/supabaseDataSource'
+import { LoginPage } from './components/LoginPage'
+import { isSupabaseConfigured, supabase } from './lib/supabase'
 import type { DashboardData, NavKey, ReservationSummary, Status } from './types/dashboard'
 
 const navItems: Array<{ key: NavKey; label: string; icon: typeof Home }> = [
@@ -74,6 +77,9 @@ const navTitle: Record<NavKey, string> = {
 function App() {
   const [activeNav, setActiveNav] = useState<NavKey>('dashboard')
   const [period, setPeriod] = useState('01/04/2025 a 30/04/2025')
+  const [currentUser, setCurrentUser] = useState(demoUser)
+  const [sessionUserId, setSessionUserId] = useState<string | null>(null)
+  const [authReady, setAuthReady] = useState(!isSupabaseConfigured)
   const [data, setData] = useState<DashboardData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isReservationOpen, setIsReservationOpen] = useState(false)
@@ -81,24 +87,74 @@ function App() {
   const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
+    if (!supabase) return
+
+    let isCurrent = true
+    supabase.auth.getSession().then(({ data: sessionData }) => {
+      if (!isCurrent) return
+      setSessionUserId(sessionData.session?.user.id ?? null)
+      setAuthReady(true)
+    })
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSessionUserId(session?.user.id ?? null)
+      if (!session) setCurrentUser(demoUser)
+    })
+
+    return () => {
+      isCurrent = false
+      authListener.subscription.unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!sessionUserId) {
+      setCurrentUser(demoUser)
+      return
+    }
+
+    getAuthenticatedUserProfile().then((profile) => {
+      if (profile) setCurrentUser(profile)
+    })
+  }, [sessionUserId])
+
+  useEffect(() => {
+    if (!authReady) return
+
     let isCurrent = true
     setIsLoading(true)
-    mockDashboardDataSource.getDashboardData({ period }).then((dashboardData) => {
+    const dataSource = sessionUserId ? supabaseDashboardDataSource : mockDashboardDataSource
+    dataSource.getDashboardData({ period }).then((dashboardData) => {
       if (isCurrent) {
         setData(dashboardData)
         setIsLoading(false)
       }
+    }).catch(() => {
+      if (isCurrent) {
+        setData(null)
+        setIsLoading(false)
+        setNotice('Não foi possível carregar os dados do Supabase.')
+      }
     })
+
     return () => {
       isCurrent = false
     }
-  }, [period])
+  }, [authReady, period, sessionUserId])
 
   useEffect(() => {
     if (!notice) return
     const timer = window.setTimeout(() => setNotice(null), 3200)
     return () => window.clearTimeout(timer)
   }, [notice])
+
+  const handleSignOut = async () => {
+    if (!supabase) {
+      setNotice('O protótipo está em modo demonstração.')
+      return
+    }
+    await supabase.auth.signOut()
+  }
 
   const handleNav = (key: NavKey) => {
     setActiveNav(key)
@@ -107,15 +163,23 @@ function App() {
     }
   }
 
+  if (isSupabaseConfigured && !authReady) {
+    return <div className="grid min-h-screen place-items-center bg-[#f4f7fb] text-sm font-semibold text-[#31516e]">Carregando acesso seguro...</div>
+  }
+
+  if (isSupabaseConfigured && !sessionUserId) {
+    return <LoginPage />
+  }
+
   return (
     <div className="flex min-h-screen min-w-0 bg-[#f4f7fb] text-[#10253f]">
-      <Sidebar activeNav={activeNav} onNavigate={handleNav} />
+      <Sidebar activeNav={activeNav} onNavigate={handleNav} user={currentUser} onSignOut={handleSignOut} />
       <main className="min-w-0 flex-1">
         <TopBar
-          user={demoUser}
+          user={currentUser}
           onSearch={() => setIsSearchOpen(true)}
           onNotification={() => setNotice('Você está em dia: nenhuma nova notificação.')}
-          onProfile={() => setNotice('Perfil de Mariana Silva — integração com Supabase em breve.')}
+          onProfile={() => setNotice(`Perfil de ${currentUser.name} — dados vindos do Supabase quando houver login.`)}
         />
         {activeNav === 'dashboard' ? (
           <DashboardPage
@@ -133,7 +197,7 @@ function App() {
       {isReservationOpen && (
         <NewReservationModal onClose={() => setIsReservationOpen(false)} onSaved={() => {
           setIsReservationOpen(false)
-          setNotice('Reserva criada no modo demonstração.')
+          setNotice(sessionUserId ? 'O cadastro completo de reservas será conectado na próxima etapa.' : 'Reserva criada no modo demonstração.')
         }} />
       )}
       {isSearchOpen && <SearchModal onClose={() => setIsSearchOpen(false)} />}
@@ -144,7 +208,7 @@ function App() {
 
 export default App
 
-function Sidebar({ activeNav, onNavigate }: { activeNav: NavKey; onNavigate: (key: NavKey) => void }) {
+function Sidebar({ activeNav, onNavigate, user, onSignOut }: { activeNav: NavKey; onNavigate: (key: NavKey) => void; user: typeof demoUser; onSignOut: () => void }) {
   return (
     <aside className="sidebar sticky top-0 flex h-screen w-[252px] shrink-0 flex-col bg-[#071d32] px-4 py-5 text-slate-300 max-[1200px]:w-[84px] max-[1200px]:px-3">
       <div className="flex items-center gap-3 px-3 pb-8">
@@ -176,13 +240,13 @@ function Sidebar({ activeNav, onNavigate }: { activeNav: NavKey; onNavigate: (ke
 
       <div className="border-t border-white/10 pt-4">
         <div className="sidebar-user-copy mb-4 flex items-center gap-3 px-2">
-          <div className="grid size-9 place-items-center rounded-full bg-[#e9f0f8] text-[12px] font-extrabold text-[#0c5f9c]">MS</div>
+          <div className="grid size-9 place-items-center rounded-full bg-[#e9f0f8] text-[12px] font-extrabold text-[#0c5f9c]">{user.initials}</div>
           <div className="min-w-0">
-            <div className="truncate text-[12px] font-bold text-white">Mariana Silva</div>
-            <div className="text-[11px] text-slate-400">Gerente geral</div>
+            <div className="truncate text-[12px] font-bold text-white">{user.name}</div>
+            <div className="text-[11px] text-slate-400">{user.role}</div>
           </div>
         </div>
-        <button className="sidebar-compact-nav flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-xs font-semibold text-slate-400 transition hover:bg-white/8 hover:text-white max-[1200px]:justify-center max-[1200px]:px-2" onClick={() => onNavigate('configuracoes')}>
+        <button className="sidebar-compact-nav flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-xs font-semibold text-slate-400 transition hover:bg-white/8 hover:text-white max-[1200px]:justify-center max-[1200px]:px-2" onClick={onSignOut}>
           <LogOut size={17} />
           <span className="sidebar-logout-label">Sair da conta</span>
         </button>
@@ -274,11 +338,11 @@ function DashboardPage({ data, isLoading, period, onPeriodChange, onNewReservati
 
 function MetricsGrid({ data }: { data: DashboardData }) {
   const metrics = [
-    { label: 'Total de hospedagens', value: '48', delta: '+12%', note: 'no período', icon: BedDouble, tone: 'blue', up: true },
-    { label: 'Reservas futuras', value: '18', delta: '+5%', note: 'próximos 30 dias', icon: CalendarDays, tone: 'purple', up: true },
-    { label: 'Faturamento bruto', value: formatCurrency(data.revenueByRoomType.reduce((total, item) => total + item.value, 0)), delta: '+18%', note: 'no período', icon: CircleDollarSign, tone: 'green', up: true },
-    { label: 'Total recebido', value: 'R$ 24.320,00', delta: '+22%', note: 'no período', icon: WalletCards, tone: 'orange', up: true },
-    { label: 'Pendências', value: 'R$ 4.240,00', delta: '-30%', note: 'a receber', icon: AlertTriangle, tone: 'red', up: false },
+    { label: 'Total de hospedagens', value: String(data.metrics.totalStays), delta: 'ao vivo', note: 'no período', icon: BedDouble, tone: 'blue', up: true },
+    { label: 'Reservas futuras', value: String(data.metrics.futureReservations), delta: 'ao vivo', note: 'próximos 30 dias', icon: CalendarDays, tone: 'purple', up: true },
+    { label: 'Faturamento bruto', value: formatCurrency(data.metrics.grossRevenue), delta: 'ao vivo', note: 'no período', icon: CircleDollarSign, tone: 'green', up: true },
+    { label: 'Total recebido', value: formatCurrency(data.metrics.totalReceived), delta: 'ao vivo', note: 'no período', icon: WalletCards, tone: 'orange', up: true },
+    { label: 'Pendências', value: formatCurrency(data.metrics.pendingAmount), delta: 'ao vivo', note: 'a receber', icon: AlertTriangle, tone: 'red', up: false },
   ]
 
   const tones: Record<string, { icon: string; bg: string }> = {
